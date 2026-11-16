@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How ReLU builds shapes: a visual walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f7f5f0;--card:#ffffff;--ink:#1f1e1c;--sub:#55534e;--muted:#8a8984;--line:#e4e1d8;--soft:#f1efe8;
+  --grid:#ebe9e2;--axis:#c3c2b7;
+  --n1:#2a78d6;--n2:#d55181;--n3:#6250d6;--sum:#1f1e1c;
+  --g:#1d9e75;--c0:#d85a30;--warn:#ba7517;--accent:#2a78d6;
+  --x1:#2a78d6;--x2:#d55181;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#141413;--card:#1e1e1c;--ink:#f0efec;--sub:#c3c2b7;--muted:#8f8d86;--line:#34332f;--soft:#282825;
+    --grid:#2c2c2a;--axis:#4a4945;
+    --n1:#3987e5;--n2:#e070a0;--n3:#9085e9;--sum:#f0efec;
+    --g:#22b083;--c0:#e0703f;--warn:#d9952b;--accent:#3987e5;
+    --x1:#3987e5;--x2:#e070a0;
+  }
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,sans-serif;font-size:16px;line-height:1.65;-webkit-font-smoothing:antialiased}
+.wrap{max-width:920px;margin:0 auto;padding:0 20px}
+nav{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;gap:6px;align-items:center;overflow-x:auto;padding-top:10px;padding-bottom:10px}
+nav a{white-space:nowrap;text-decoration:none;color:var(--sub);font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover{background:var(--soft);color:var(--ink)}
+nav .brand{font-family:Fraunces,serif;font-weight:600;color:var(--ink);margin-right:8px;padding-left:0}
+header{padding:64px 0 32px}
+h1{font-family:Fraunces,serif;font-weight:600;font-size:clamp(32px,5vw,48px);line-height:1.12;margin:0 0 16px;letter-spacing:-0.01em}
+h2{font-family:Fraunces,serif;font-weight:600;font-size:30px;margin:0 0 8px;letter-spacing:-0.01em}
+h3{font-size:19px;font-weight:600;margin:0}
+.lede{font-size:19px;color:var(--sub);max-width:680px;margin:0}
+.part{padding:48px 0 16px;scroll-margin-top:60px}
+.part-tag{display:inline-block;font-size:13px;font-weight:500;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);padding:4px 12px;border-radius:999px;margin-bottom:12px}
+.part > p{color:var(--sub);max-width:700px}
+.step{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:28px;margin:22px 0;scroll-margin-top:70px}
+.step-head{display:flex;align-items:center;gap:14px;margin-bottom:6px}
+.badge{flex:none;width:34px;height:34px;border-radius:50%;background:var(--ink);color:var(--card);display:grid;place-items:center;font-weight:600;font-size:15px}
+.step > p,.explain p{color:var(--sub);margin:8px 0}
+.step > p strong,.explain strong{color:var(--ink);font-weight:600}
+.explain{background:var(--soft);border-radius:12px;padding:14px 18px;margin-top:16px}
+.explain p{margin:4px 0}
+.ctrl{display:flex;align-items:center;gap:12px;margin:14px 0;flex-wrap:wrap}
+.ctrl label{font-size:14px;color:var(--sub);min-width:84px}
+.ctrl input[type=range]{flex:1;min-width:160px;accent-color:var(--accent)}
+.ctrl .val{font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:500;min-width:64px;text-align:right}
+.calc{font-family:'JetBrains Mono',monospace;font-size:13.5px;line-height:1.95;background:var(--soft);border-radius:12px;padding:14px 18px;margin-top:14px;overflow-x:auto;white-space:nowrap}
+.calc .hl{color:var(--ink);font-weight:500}
+.muted{color:var(--muted)}
+svg text{font-family:Inter,system-ui,sans-serif}
+.tick{font-size:11px;fill:var(--muted)}
+.axl{font-size:12px;fill:var(--sub)}
+.seg{display:inline-flex;background:var(--soft);border-radius:10px;padding:3px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;color:var(--sub);font:inherit;font-size:14px;padding:7px 14px;border-radius:8px;cursor:pointer}
+.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 0 0 1px var(--line)}
+.switch{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--sub);cursor:pointer;user-select:none}
+.switch input{accent-color:var(--c0);width:16px;height:16px}
+.cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}
+.mini{background:var(--soft);border-radius:12px;padding:12px}
+.mini h4{margin:0 0 2px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+.mini p{margin:6px 0 0;font-size:13.5px;color:var(--sub);line-height:1.5}
+.dot{width:10px;height:10px;border-radius:3px;display:inline-block;flex:none}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:14px}
+.stat{background:var(--soft);border-radius:12px;padding:10px 14px}
+.stat .k{font-size:12px;color:var(--sub)}
+.stat .v{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums}
+.two{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:22px;align-items:start;margin-top:10px}
+.heatrow{display:flex;align-items:center;gap:10px;margin-top:14px}
+.heatrow .hm{flex:1;min-width:0;text-align:center}
+.heatrow canvas{width:100%;aspect-ratio:1;border-radius:10px;display:block;border:1px solid var(--line)}
+.heatrow .op{font-family:Fraunces,serif;font-size:30px;color:var(--muted);flex:none}
+.heatrow .cap{font-size:13px;color:var(--sub);margin-top:6px}
+canvas.big{width:100%;aspect-ratio:1;border-radius:12px;display:block;border:1px solid var(--line);cursor:crosshair}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12.5px;color:var(--sub);margin-top:10px}
+.legend span{display:flex;align-items:center;gap:6px}
+.verdict{display:inline-block;font-weight:600;padding:4px 12px;border-radius:999px;font-size:14px}
+.verdict.yes{color:var(--g);background:color-mix(in srgb,var(--g) 14%,transparent)}
+.verdict.no{color:var(--c0);background:color-mix(in srgb,var(--c0) 14%,transparent)}
+.scene{display:flex;align-items:flex-end;justify-content:center;gap:18px;background:var(--soft);border-radius:14px;padding:16px 12px 10px}
+.recap{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-top:18px}
+.recap div{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+.recap b{display:block;margin-bottom:4px;font-weight:600}
+.recap p{margin:0;color:var(--sub);font-size:14.5px}
+footer{padding:40px 0 60px;color:var(--muted);font-size:13px;text-align:center}
+@media (max-width:720px){
+  .two,.cols3{grid-template-columns:1fr}
+  .step{padding:20px}
+  .heatrow{flex-wrap:wrap}
+  .heatrow .hm{flex:1 1 40%}
+}
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <a class="brand" href="#top">ReLU, visually</a>
+  <a href="#basics">ReLU basics</a>
+  <a href="#triangle">Example 1: triangle</a>
+  <a href="#diamond">Example 2: diamond</a>
+  <a href="#recap">Recap</a>
+</div></nav>
+
+<div class="wrap" id="top">
+<header>
+  <h1>How a few bent lines build shapes</h1>
+  <p class="lede">A neural network is made of tiny pieces called neurons. With the ReLU activation, each neuron is just a line with one bend in it. This page shows, step by step, how adding a few of those bent lines together builds a triangle, then a diamond, and how those shapes can make real predictions.</p>
+</header>
+
+<!-- ================= PART 0 ================= -->
+<section class="part" id="basics">
+  <span class="part-tag">Start here</span>
+  <h2>What ReLU does</h2>
+  <p>ReLU stands for "rectified linear unit". The rule is very short: <strong>if the number is negative, output 0; otherwise, pass it through unchanged.</strong></p>
+
+  <div class="step">
+    <div class="step-head"><div class="badge">A</div><h3>One neuron = one bent line</h3></div>
+    <p>A neuron first computes <strong>z = w·x + b</strong> (a straight line). Then ReLU clips everything below zero. The result is a line that is flat, then bends upward (or downward) at one spot: the <strong>hinge</strong>.</p>
+    <svg id="relu-plot" viewBox="0 0 680 300" width="100%" role="img" aria-label="Plot of a single ReLU neuron with adjustable weight and bias"></svg>
+    <div class="ctrl"><label>Weight w</label><input type="range" id="r-w" min="-2" max="2" step="0.5" value="1"><span class="val" id="r-wv"></span></div>
+    <div class="ctrl"><label>Bias b</label><input type="range" id="r-b" min="-2" max="2" step="0.5" value="0"><span class="val" id="r-bv"></span></div>
+    <div class="ctrl"><label>Input x</label><input type="range" id="r-x" min="-3" max="3" step="0.1" value="1.5"><span class="val" id="r-xv"></span></div>
+    <div class="calc" id="r-calc"></div>
+    <div class="explain" id="r-explain"></div>
+  </div>
+
+  <div class="step">
+    <div class="step-head"><div class="badge">B</div><h3>Why the bend matters (nonlinearity)</h3></div>
+    <p>Without ReLU, every neuron is a straight line. And here's the catch: <strong>adding straight lines together only ever gives another straight line.</strong> No matter how many neurons you stack, you could never make a peak, a dip, or a closed shape.</p>
+    <p>ReLU breaks that. Because each neuron is flat on one side and sloped on the other, adding them gives a line whose slope <strong>changes</strong> at each hinge. That's what "nonlinear" means here, and it's the whole reason neural networks can learn shapes. You'll see this directly in Example 1, where turning ReLU off makes the triangle collapse into a flat line.</p>
+  </div>
+</section>
+
+<!-- ================= PART 1 ================= -->
+<section class="part" id="triangle">
+  <span class="part-tag">Example 1 · one input</span>
+  <h2>Three neurons make a triangle</h2>
+  <p>Our first network has one input <em>x</em>, three ReLU neurons, and one output <em>y</em>:</p>
+  <p style="font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--ink)">y = ReLU(x + 1) − 2·ReLU(x) + ReLU(x − 1)</p>
+
+  <div class="step" id="t-s1">
+    <div class="step-head"><div class="badge">1</div><h3>The model</h3></div>
+    <p>Here is the network as a diagram. Every input weight is <strong>1</strong>. What makes the three neurons different is their <strong>bias</strong> (+1, 0, −1), which decides <em>where</em> each one turns on. The <strong>output weights</strong> (+1, −2, +1) decide how much each neuron pushes the final answer up or down.</p>
+    <div id="arch1-static"></div>
+    <div class="legend">
+      <span><svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="var(--sub)" stroke-width="2"/></svg>Positive output weight</span>
+      <span><svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="var(--c0)" stroke-width="4" stroke-dasharray="6 3"/></svg>Negative output weight (thicker = bigger)</span>
+    </div>
+  </div>
+
+  <div class="step" id="t-s2">
+    <div class="step-head"><div class="badge">2</div><h3>Output values: run a number through it</h3></div>
+    <p>Drag <em>x</em> and watch the numbers flow left to right. A neuron that outputs 0 is <strong>off</strong> (grey). Notice how they switch on one at a time as x grows.</p>
+    <div class="ctrl"><label>Input x</label><input type="range" id="t2-x" min="-2" max="2" step="0.1" value="-0.5"><span class="val" id="t2-xv"></span></div>
+    <div id="arch1-live"></div>
+    <div class="calc" id="t2-calc"></div>
+  </div>
+
+  <div class="step" id="t-s3">
+    <div class="step-head"><div class="badge">3</div><h3>What each neuron's line means</h3></div>
+    <p>Let's plot each neuron's contribution (its ReLU output times its output weight) for every x. Each one is a bent line with its hinge in a different place.</p>
+    <div class="ctrl"><label>Input x</label><input type="range" id="t3-x" min="-2" max="2" step="0.1" value="0.5"><span class="val" id="t3-xv"></span></div>
+    <div class="cols3">
+      <div class="mini"><h4><span class="dot" style="background:var(--n1)"></span>Neuron 1 × (+1)</h4><svg id="m1" viewBox="0 0 260 190" width="100%"></svg><p>Off until <strong>x = −1</strong>, then climbs with slope <strong>+1</strong>. It starts the rise.</p><div class="calc" id="m1v" style="margin-top:8px;padding:8px 12px"></div></div>
+      <div class="mini"><h4><span class="dot" style="background:var(--n2)"></span>Neuron 2 × (−2)</h4><svg id="m2" viewBox="0 0 260 190" width="100%"></svg><p>Off until <strong>x = 0</strong>, then drops with slope <strong>−2</strong>. It turns the climb into a fall.</p><div class="calc" id="m2v" style="margin-top:8px;padding:8px 12px"></div></div>
+      <div class="mini"><h4><span class="dot" style="background:var(--n3)"></span>Neuron 3 × (+1)</h4><svg id="m3" viewBox="0 0 260 190" width="100%"></svg><p>Off until <strong>x = 1</strong>, then climbs with slope <strong>+1</strong>. It cancels the fall and flattens it.</p><div class="calc" id="m3v" style="margin-top:8px;padding:8px 12px"></div></div>
+    </div>
+    <div class="explain"><p><strong>The key idea:</strong> no single neuron looks like a triangle. Each just says "from my hinge onward, change the slope by my weight". The triangle only appears when you add them up, which is the next step.</p></div>
+  </div>
+
+  <div class="step" id="t-s4">
+    <div class="step-head"><div class="badge">4</div><h3>The final output: adding the lines</h3></div>
+    <p>Add the neurons one at a time and watch the shape form. The slope of the final line changes at every hinge.</p>
+    <div class="ctrl" style="justify-content:space-between">
+      <div class="seg" id="t4-seg"><button data-k="1">Neuron 1 only</button><button data-k="2">+ Neuron 2</button><button data-k="3" class="on">+ Neuron 3 (full network)</button></div>
+      <label class="switch"><input type="checkbox" id="t4-off">Turn ReLU off</label>
+    </div>
+    <svg id="t4-plot" viewBox="0 0 680 320" width="100%" role="img" aria-label="Running sum of neuron outputs"></svg>
+    <div class="legend">
+      <span><svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="var(--sum)" stroke-width="3.5"/></svg>Final output y (sum)</span>
+      <span><svg width="24" height="8"><line x1="0" y1="4" x2="24" y2="4" stroke="var(--muted)" stroke-width="2" stroke-dasharray="4 3"/></svg>Individual neuron contributions</span>
+    </div>
+    <div class="explain" id="t4-explain"></div>
+  </div>
+
+  <div class="step" id="t-s5">
+    <div class="step-head"><div class="badge">5</div><h3>In a real scenario: plant growth vs temperature</h3></div>
+    <p>Imagine a plant that grows best at <strong>25 °C</strong>, slows down as it gets colder or hotter, and stops growing below 15 °C or above 35 °C. That's exactly a triangle! We first rescale temperature so 25 °C becomes x = 0, using <strong>x = (T − 25) / 10</strong>. Then the network's output y is the growth rate.</p>
+    <div class="ctrl"><label>Temperature</label><input type="range" id="t5-T" min="5" max="45" step="1" value="21"><span class="val" id="t5-Tv"></span></div>
+    <div class="two">
+      <div>
+        <div class="scene" id="t5-scene"></div>
+      </div>
+      <div>
+        <svg id="t5-plot" viewBox="0 0 400 260" width="100%" role="img" aria-label="Growth rate against temperature"></svg>
+        <div class="calc" id="t5-calc" style="white-space:normal"></div>
+      </div>
+    </div>
+    <div class="explain"><p><strong>Two ways to use the output.</strong> As a <strong>number</strong> (regression): "growth will be 60% of maximum". Or as a <strong>yes/no</strong> (classification): if y ≥ 0.5, call it "good conditions". With the triangle, y ≥ 0.5 happens only between 20 °C and 30 °C, so the network has learned a "comfort zone".</p></div>
+  </div>
+</section>
+
+<!-- ================= PART 2 ================= -->
+<section class="part" id="diamond">
+  <span class="part-tag">Example 2 · two inputs</span>
+  <h2>Two triangles make a diamond</h2>
+  <p>Now give the network two inputs, x₁ and x₂. We build one triangle ("tent") for each input and add them:</p>
+  <p style="font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--ink)">y = Tent(x₁) + Tent(x₂)<br><span class="muted" style="font-size:13.5px">where Tent(x) = ReLU(x + 1) − 2·ReLU(x) + ReLU(x − 1)</span></p>
+
+  <div class="step" id="d-s1">
+    <div class="step-head"><div class="badge">1</div><h3>The model</h3></div>
+    <p>Six neurons this time: three <span style="color:var(--x1);font-weight:600">look only at x₁</span>, three <span style="color:var(--x2);font-weight:600">look only at x₂</span>. Each group is the exact same triangle as Example 1. All input weights are 1, biases are +1, 0, −1 in each group, and output weights are +1, −2, +1 in each group.</p>
+    <div id="arch2-static"></div>
+  </div>
+
+  <div class="step" id="d-s2">
+    <div class="step-head"><div class="badge">2</div><h3>Output values</h3></div>
+    <p>Move both inputs. Each group of three neurons builds its own tent value, and the output adds the two tents.</p>
+    <div class="ctrl"><label>Input x₁</label><input type="range" id="d2-a" min="-2" max="2" step="0.1" value="0.3"><span class="val" id="d2-av"></span></div>
+    <div class="ctrl"><label>Input x₂</label><input type="range" id="d2-b" min="-2" max="2" step="0.1" value="-0.2"><span class="val" id="d2-bv"></span></div>
+    <div id="arch2-live"></div>
+    <div class="calc" id="d2-calc"></div>
+  </div>
+
+  <div class="step" id="d-s3">
+    <div class="step-head"><div class="badge">3</div><h3>What each part means</h3></div>
+    <p>With two inputs, the output isn't a line anymore. It's a <strong>surface</strong> over a flat map of (x₁, x₂). Below, darker color means a bigger value. Each tent becomes a <strong>ridge</strong>: Tent(x₁) is high in a vertical strip where x₁ is near 0 (whatever x₂ is), and Tent(x₂) is high in a horizontal strip.</p>
+    <div class="heatrow">
+      <div class="hm"><canvas id="h-t1" width="260" height="260"></canvas><div class="cap">Tent(x₁): vertical ridge</div></div>
+      <div class="op">+</div>
+      <div class="hm"><canvas id="h-t2" width="260" height="260"></canvas><div class="cap">Tent(x₂): horizontal ridge</div></div>
+      <div class="op">=</div>
+      <div class="hm"><canvas id="h-sum" width="260" height="260"></canvas><div class="cap">y: peak where they cross</div></div>
+    </div>
+    <div class="explain"><p><strong>Where the ridges cross, they stack.</strong> Each ridge maxes out at 1, so y can reach 2, but only near the center, where x₁ and x₂ are both close to 0. Along an arm of the cross, only one ridge contributes, so y stays at 1 or less.</p></div>
+  </div>
+
+  <div class="step" id="d-s4">
+    <div class="step-head"><div class="badge">4</div><h3>The final output: a region classifier</h3></div>
+    <p>Now pick a threshold. Points where y is above it are <strong>class 1</strong>, the rest are <strong>class 0</strong>. The green line is the boundary between them. Click anywhere on the map to test a point.</p>
+    <div class="two">
+      <div><canvas id="d4-cv" class="big" width="480" height="480" role="img" aria-label="Decision region over the plane"></canvas></div>
+      <div>
+        <div class="ctrl" style="margin-top:0"><label>Threshold</label><input type="range" id="d4-t" min="0.2" max="1.9" step="0.05" value="1.5"><span class="val" id="d4-tv"></span></div>
+        <div class="stats">
+          <div class="stat"><div class="k">Region shape</div><div class="v" id="d4-shape"></div></div>
+          <div class="stat"><div class="k">Training accuracy</div><div class="v" id="d4-acc"></div></div>
+        </div>
+        <div class="calc" id="d4-calc" style="white-space:normal"></div>
+      </div>
+    </div>
+    <div class="legend">
+      <span><svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--g)"/></svg>Class 1 (true label)</span>
+      <span><svg width="12" height="12"><rect x="1" y="1" width="10" height="10" fill="var(--c0)"/></svg>Class 0 (true label)</span>
+      <span><svg width="14" height="14"><circle cx="7" cy="7" r="5.5" fill="none" stroke="#e24b4a" stroke-width="2"/></svg>Misclassified</span>
+      <span><svg width="14" height="14"><polygon points="7,1 13,7 7,13 1,7" fill="var(--ink)"/></svg>Your test point</span>
+      <span><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke="var(--g)" stroke-width="3"/></svg>Decision boundary</span>
+    </div>
+    <div class="explain" id="d4-explain"></div>
+  </div>
+
+  <div class="step" id="d-s5">
+    <div class="step-head"><div class="badge">5</div><h3>In a real scenario: a greenhouse with two controls</h3></div>
+    <p>Now the plant cares about <strong>temperature</strong> (best at 25 °C) and <strong>soil moisture</strong> (best at 50%). We rescale both so the ideal is 0: <strong>x₁ = (T − 25) / 10</strong> and <strong>x₂ = (M − 50) / 30</strong>. The network says the plant <strong>thrives</strong> when y ≥ 1.5. Drag the sliders, or click the map.</p>
+    <div class="ctrl"><label>Temperature</label><input type="range" id="d5-T" min="5" max="45" step="1" value="27"><span class="val" id="d5-Tv"></span></div>
+    <div class="ctrl"><label>Moisture</label><input type="range" id="d5-M" min="0" max="100" step="1" value="44"><span class="val" id="d5-Mv"></span></div>
+    <div class="two">
+      <div><canvas id="d5-cv" class="big" width="480" height="480" role="img" aria-label="Greenhouse conditions map"></canvas></div>
+      <div>
+        <div class="scene" id="d5-scene"></div>
+        <div class="calc" id="d5-calc" style="white-space:normal"></div>
+      </div>
+    </div>
+    <div class="explain"><p><strong>Why a diamond makes sense here:</strong> the plant can tolerate being a bit off on temperature <em>or</em> a bit off on moisture, but not far off on both at once. The network turned that idea into a closed "safe zone" on the map, just by adding two tents and picking a threshold.</p></div>
+  </div>
+</section>
+
+<!-- ================= RECAP ================= -->
+<section class="part" id="recap">
+  <span class="part-tag">Recap</span>
+  <h2>What to remember</h2>
+  <div class="recap">
+    <div><b>1. ReLU = one bend</b><p>Each neuron is flat, then sloped. The bias picks where the bend (hinge) is; the weights pick how steep it is.</p></div>
+    <div><b>2. Adding bends makes shapes</b><p>Each hinge changes the slope of the total. Up, down, flat: three neurons made a triangle.</p></div>
+    <div><b>3. Without ReLU, no shapes</b><p>Straight lines added together are still a straight line. The bend is what makes the network nonlinear.</p></div>
+    <div><b>4. More inputs, more dimensions</b><p>A tent per input, added together, makes a peak on a map. A threshold turns that peak into a region: a diamond.</p></div>
+    <div><b>5. Output → prediction</b><p>Use y as a number (how much growth), or compare it to a threshold for a yes/no (good conditions or not).</p></div>
+    <div><b>6. Training finds the numbers</b><p>Here the weights were hand-picked. In practice, training adjusts them automatically until the shapes fit the data.</p></div>
+  </div>
+</section>
+
+<footer>An interactive walkthrough of ReLU networks · drag, click, and experiment</footer>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const R=v=>Math.max(0,v), tent=x=>R(x+1)-2*R(x)+R(x-1);
+const f2=v=>{v=Math.abs(v)<0.005?0:v;return v.toFixed(2)};
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const hex=h=>{h=h.replace('#','');return [0,2,4].map(i=>parseInt(h.slice(i,i+2),16))};
+const mix=(a,b,t)=>{const A=hex(a),B=hex(b);return 'rgb('+A.map((v,i)=>Math.round(v+(B[i]-v)*t)).join(',')+')'};
+const sgnw=w=>w>0?'+'+w:'−'+Math.abs(w);
+const bstr=b=>b>0?'+ '+b:b<0?'− '+Math.abs(b):'+ 0';
+
+/* ---------- generic SVG plot helper ---------- */
+function plot(o){
+  const m=Object.assign({l:42,r:14,t:22,b:34},o.m||{});
+  const sx=x=>m.l+(x-o.xmin)/(o.xmax-o.xmin)*(o.W-m.l-m.r);
+  const sy=y=>m.t+(o.ymax-y)/(o.ymax-o.ymin)*(o.H-m.t-m.b);
+  return {sx,sy,m,
+    frame(xt,yt,xl,yl,fx=v=>v,fy=v=>v){
+      let s='';
+      yt.forEach(v=>{s+=`<line x1="${m.l}" x2="${o.W-m.r}" y1="${sy(v)}" y2="${sy(v)}" stroke="var(--${v===0?'axis':'grid'})" stroke-width="1"/><text x="${m.l-7}" y="${sy(v)+4}" text-anchor="end" class="tick">${fy(v)}</text>`});
+      xt.forEach(v=>{s+=`<text x="${sx(v)}" y="${o.H-m.b+17}" text-anchor="middle" class="tick">${fx(v)}</text>`});
+      if(xl)s+=`<text x="${o.W-m.r}" y="${o.H-3}" text-anchor="end" class="axl">${xl}</text>`;
+      if(yl)s+=`<text x="${m.l-7}" y="12" text-anchor="start" class="axl">${yl}</text>`;
+      return s},
+    curve(fn,color,w=2.5,dash='',op=1,clip=''){
+      const n=400,p=[];for(let i=0;i<=n;i++){const x=o.xmin+(o.xmax-o.xmin)*i/n;p.push(sx(x).toFixed(1)+','+sy(fn(x)).toFixed(1))}
+      return `<polyline ${clip?`clip-path="url(#${clip})"`:''} fill="none" stroke="${color}" stroke-width="${w}" stroke-dasharray="${dash}" opacity="${op}" stroke-linejoin="round" stroke-linecap="round" points="${p.join(' ')}"/>`},
+    clipDef(id){return `<defs><clipPath id="${id}"><rect x="${m.l}" y="${m.t-2}" width="${o.W-m.l-m.r}" height="${o.H-m.t-m.b+4}"/></clipPath></defs>`},
+    vline(x,color,dash='3 4'){return `<line x1="${sx(x)}" x2="${sx(x)}" y1="${m.t}" y2="${o.H-m.b}" stroke="${color}" stroke-dasharray="${dash}" stroke-width="1.2"/>`},
+    dot(x,y,color,r=6){return `<circle cx="${sx(x)}" cy="${sy(y)}" r="${r}" fill="${color}" stroke="var(--card)" stroke-width="2.5"/>`}
+  }
+}
+
+/* ---------- PART 0: ReLU demo ---------- */
+function drawRelu(){
+  const w=+$('r-w').value,b=+$('r-b').value,x=+$('r-x').value;
+  $('r-wv').textContent=w.toFixed(1);$('r-bv').textContent=b.toFixed(1);$('r-xv').textContent=x.toFixed(1);
+  const P=plot({xmin:-3,xmax:3,ymin:-3,ymax:5,W:680,H:300});
+  const z=t=>w*t+b, a=t=>R(z(t));
+  let s=P.clipDef('rc')+P.frame([-3,-2,-1,0,1,2,3],[-2,0,2,4],'x','output');
+  s+=P.vline(0,'var(--axis)','');
+  if(w!==0){const h=-b/w;if(h>-3&&h<3){s+=P.vline(h,'var(--warn)');s+=`<text x="${P.sx(h)+6}" y="${P.m.t+12}" class="axl" style="fill:var(--warn)">hinge at x = ${f2(h)}</text>`}}
+  s+=P.curve(z,'var(--muted)',2,'6 5',1,'rc');
+  s+=P.curve(a,'var(--n1)',3.5,'',1,'rc');
+  s+=`<line x1="${P.sx(x)}" x2="${P.sx(x)}" y1="${P.sy(0)}" y2="${P.sy(a(x))}" stroke="var(--ink)" stroke-dasharray="2 3"/>`;
+  s+=P.dot(x,a(x),'var(--n1)',7);
+  s+=`<g transform="translate(${P.m.l+12},${P.m.t+6})"><line x1="0" y1="6" x2="22" y2="6" stroke="var(--muted)" stroke-width="2" stroke-dasharray="6 5"/><text x="28" y="10" class="axl">z = w·x + b (before ReLU)</text><line x1="0" y1="26" x2="22" y2="26" stroke="var(--n1)" stroke-width="3.5"/><text x="28" y="30" class="axl">ReLU(z) (neuron output)</text></g>`;
+  $('relu-plot').innerHTML=s;
+  const zz=z(x),on=zz>0;
+  $('r-calc').innerHTML=`z = w·x + b = (${w})(${x.toFixed(1)}) ${bstr(b)} = ${f2(zz)}<br>ReLU(z) = <span class="hl">${f2(R(zz))}</span> &nbsp;<span class="muted">${on?'→ neuron is ON (passes the value through)':'→ neuron is OFF (negative, so blocked to 0)'}</span>`;
+  let e='';
+  if(w===0)e='<p><strong>w = 0:</strong> the neuron ignores x completely. Its output is a flat line at ReLU(b). No hinge, so it can\'t help build shapes.</p>';
+  else e=`<p><strong>The hinge is where z = 0</strong>, i.e. at x = −b / w = ${f2(-b/w)}. Try the bias slider: it slides the hinge left and right. The weight sets how steep the sloped side is, and its sign decides which side is flat: ${w>0?'with w > 0 the neuron is off on the left and rises on the right.':'with w < 0 it is off on the right and rises toward the left.'}</p>`;
+  $('r-explain').innerHTML=e;
+}
+['r-w','r-b','r-x'].forEach(id=>$(id).addEventListener('input',drawRelu));
+
+/* ---------- architecture diagram ---------- */
+function arch(cfg,vals){
+  const live=!!vals,two=cfg.two;
+  const bh=two?(live?50:42):74, sp=two?62:104, top=24;
+  const H=cfg.hidden.map((h,i)=>({...h,yc:top+bh/2+i*sp}));
+  const Ht=H[H.length-1].yc+bh/2+44, oy=(H[0].yc+H[H.length-1].yc)/2;
+  const inY=two?[(H[0].yc+H[2].yc)/2,(H[3].yc+H[5].yc)/2]:[oy];
+  const BX=250,BW=190,OX=606;
+  const act=H.map(h=>live?R(vals.x[h.inp]+h.b):null);
+  let e='',p='',n='';
+  H.forEach((h,i)=>{
+    const on=!live||act[i]>0, fade=on?1:0.25, iy=inY[h.inp];
+    e+=`<line x1="98" y1="${iy}" x2="${BX}" y2="${h.yc}" stroke="${h.color}" stroke-width="1.6" opacity="${0.75*fade}"/>`;
+    const pos=h.w>0, col=pos?'var(--sub)':'var(--c0)';
+    e+=`<line x1="${BX+BW}" y1="${h.yc}" x2="${OX-38}" y2="${oy}" stroke="${col}" stroke-width="${Math.abs(h.w)*1.8}" stroke-dasharray="${pos?'':'6 3'}" opacity="${fade}"/>`;
+    const t=0.42,px=BX+BW+t*(OX-38-BX-BW),py=h.yc+t*(oy-h.yc);
+    p+=`<g opacity="${on?1:0.45}"><rect x="${px-21}" y="${py-11}" width="42" height="22" rx="11" fill="var(--card)" stroke="${col}" stroke-width="1"/><text x="${px}" y="${py+4}" text-anchor="middle" font-size="12" font-weight="600" fill="${pos?'var(--ink)':'var(--c0)'}">${sgnw(h.w)}</text></g>`;
+    if(!two){const qx=(98+BX)/2,qy=(iy+h.yc)/2;p+=`<g><rect x="${qx-24}" y="${qy-10}" width="48" height="20" rx="10" fill="var(--card)" stroke="${h.color}" stroke-width="1"/><text x="${qx}" y="${qy+4}" text-anchor="middle" font-size="11.5" fill="var(--sub)">w = 1</text></g>`}
+    const fill=on?h.color:'var(--soft)', tc=on?'var(--ink)':'var(--muted)', sc=on?h.color:'var(--line)';
+    const xn=two?`x${h.inp?'₂':'₁'}`:'x', y0=h.yc-bh/2;
+    n+=`<rect x="${BX}" y="${y0}" width="${BW}" height="${bh}" rx="10" fill="${fill}" fill-opacity="${on?0.13:1}" stroke="${sc}" stroke-width="1.2"/>`;
+    if(two){
+      n+=`<text x="${BX+BW/2}" y="${live?h.yc-6:h.yc+5}" text-anchor="middle" font-size="13.5" font-weight="500" fill="${tc}">ReLU(${xn} ${bstr(h.b)})</text>`;
+      if(live)n+=`<text x="${BX+BW/2}" y="${h.yc+14}" text-anchor="middle" font-size="12.5" fill="${tc}" font-family="JetBrains Mono,monospace">= ${f2(act[i])}${on?'':'  (off)'}</text>`;
+    }else{
+      n+=`<text x="${BX+BW/2}" y="${h.yc-15}" text-anchor="middle" font-size="13.5" font-weight="600" fill="${tc}">Neuron ${i+1}</text>`;
+      n+=`<text x="${BX+BW/2}" y="${h.yc+4}" text-anchor="middle" font-size="13" fill="${tc}">ReLU(${xn} ${bstr(h.b)})</text>`;
+      n+=`<text x="${BX+BW/2}" y="${h.yc+23}" text-anchor="middle" font-size="12.5" fill="${on?'var(--sub)':'var(--muted)'}" ${live?'font-family="JetBrains Mono,monospace"':''}>${live?('= '+f2(act[i])+(on?'':'  (off)')):'bias b = '+(h.b>0?'+':h.b<0?'−':'')+Math.abs(h.b)}</text>`;
+    }
+  });
+  let io='';
+  inY.forEach((iy,k)=>{const nm=two?`x${k?'₂':'₁'}`:'x';const c=two?(k?'var(--x2)':'var(--x1)'):'var(--sub)';
+    io+=`<circle cx="70" cy="${iy}" r="28" fill="var(--soft)" stroke="${c}" stroke-width="1.5"/><text x="70" y="${live?iy-3:iy+5}" text-anchor="middle" font-size="16" font-weight="600" fill="var(--ink)">${nm}</text>`;
+    if(live)io+=`<text x="70" y="${iy+15}" text-anchor="middle" font-size="12" fill="var(--sub)" font-family="JetBrains Mono,monospace">${f2(vals.x[k])}</text>`});
+  const y=live?H.reduce((s,h,i)=>s+h.w*act[i],0):null;
+  io+=`<circle cx="${OX}" cy="${oy}" r="38" fill="color-mix(in srgb,var(--warn) 16%,var(--card))" stroke="var(--warn)" stroke-width="1.5"/><text x="${OX}" y="${live?oy-4:oy+6}" text-anchor="middle" font-size="17" font-weight="600" fill="var(--ink)">y</text>`;
+  if(live)io+=`<text x="${OX}" y="${oy+16}" text-anchor="middle" font-size="13" font-weight="500" fill="var(--ink)" font-family="JetBrains Mono,monospace">${f2(y)}</text>`;
+  else io+=`<text x="${OX}" y="${oy+56}" text-anchor="middle" font-size="12" fill="var(--sub)">adds everything</text>`;
+  const ft=`<text x="70" y="${Ht-10}" text-anchor="middle" class="axl">Input</text><text x="${BX+BW/2}" y="${Ht-10}" text-anchor="middle" class="axl">Hidden layer (ReLU neurons)</text><text x="${OX}" y="${Ht-10}" text-anchor="middle" class="axl">Output</text>`;
+  return `<svg viewBox="0 0 680 ${Ht}" width="100%" role="img" aria-label="Network architecture diagram">${e}${n}${p}${io}${ft}</svg>`;
+}
+const A1={two:false,hidden:[{inp:0,b:1,w:1,color:'var(--n1)'},{inp:0,b:0,w:-2,color:'var(--n2)'},{inp:0,b:-1,w:1,color:'var(--n3)'}]};
+const A2={two:true,hidden:[{inp:0,b:1,w:1,color:'var(--x1)'},{inp:0,b:0,w:-2,color:'var(--x1)'},{inp:0,b:-1,w:1,color:'var(--x1)'},{inp:1,b:1,w:1,color:'var(--x2)'},{inp:1,b:0,w:-2,color:'var(--x2)'},{inp:1,b:-1,w:1,color:'var(--x2)'}]};
+
+/* ---------- PART 1 ---------- */
+const NEU=[{b:1,w:1,c:'var(--n1)'},{b:0,w:-2,c:'var(--n2)'},{b:-1,w:1,c:'var(--n3)'}];
+function region(x){
+  if(x<-1)return 'Region 1 (x < −1): all neurons off → y = 0';
+  if(x<0)return 'Region 2 (−1 ≤ x < 0): only neuron 1 on → y = x + 1 (going up)';
+  if(x<1)return 'Region 3 (0 ≤ x < 1): neurons 1 and 2 on → y = 1 − x (going down)';
+  return 'Region 4 (x ≥ 1): all on → y = 0 (flat again)';
+}
+function drawT2(){
+  const x=+$('t2-x').value;$('t2-xv').textContent=x.toFixed(1);
+  $('arch1-live').innerHTML=arch(A1,{x:[x]});
+  const a=NEU.map(n=>R(x+n.b));const y=NEU.reduce((s,n,i)=>s+n.w*a[i],0);
+  $('t2-calc').innerHTML=NEU.map((n,i)=>`Neuron ${i+1}: ReLU(1·(${x.toFixed(1)}) ${bstr(n.b)}) = ReLU(${f2(x+n.b)}) = ${f2(a[i])}`).join('<br>')+
+  `<br><span class="hl">y = (+1)(${f2(a[0])}) + (−2)(${f2(a[1])}) + (+1)(${f2(a[2])}) = ${f2(y)}</span><br><span class="muted">${region(x)}</span>`;
+}
+$('t2-x').addEventListener('input',drawT2);
+
+function drawT3(){
+  const x=+$('t3-x').value;$('t3-xv').textContent=x.toFixed(1);
+  NEU.forEach((n,i)=>{
+    const P=plot({xmin:-2,xmax:2,ymin:-4.3,ymax:3.3,W:260,H:190,m:{l:30,r:8,t:12,b:26}});
+    const f=t=>n.w*R(t+n.b);
+    let s=P.frame([-2,-1,0,1,2],[-4,-2,0,2],'','');
+    s+=P.vline(-n.b,'var(--warn)');
+    s+=P.curve(f,n.c,3);
+    s+=P.dot(x,f(x),n.c,5.5);
+    $('m'+(i+1)).innerHTML=s;
+    $('m'+(i+1)+'v').innerHTML=`${sgnw(n.w)} × ReLU(${f2(x+n.b)}) = <span class="hl">${f2(f(x))}</span>`;
+  });
+}
+$('t3-x').addEventListener('input',drawT3);
+
+let t4k=3;
+function drawT4(){
+  const off=$('t4-off').checked;
+  const act=NEU.slice(0,t4k);
+  const g=n=>off?(t=>n.w*(t+n.b)):(t=>n.w*R(t+n.b));
+  const S=t=>act.reduce((s,n)=>s+g(n)(t),0);
+  const P=plot({xmin:-2,xmax:2,ymin:-1.6,ymax:3.3,W:680,H:320,m:{l:42,r:14,t:40,b:34}});
+  let s=P.clipDef('t4c')+P.frame([-2,-1,0,1,2],[-1,0,1,2,3],'x','y');
+  let hs=off?[]:act.map(n=>-n.b).sort((a,b)=>a-b);
+  hs.forEach(h=>s+=P.vline(h,'var(--warn)'));
+  const bounds=[-2,...hs,2];
+  for(let i=0;i<bounds.length-1;i++){const a=bounds[i],b=bounds[i+1];const sl=(S(b)-S(a))/(b-a);const r=Math.round(sl*100)/100;
+    s+=`<text x="${(P.sx(a)+P.sx(b))/2}" y="22" text-anchor="middle" font-size="12.5" font-weight="500" fill="var(--sub)">slope ${r>0?'+':''}${r===0?'0':r}</text>`}
+  act.forEach(n=>s+=P.curve(g(n),n.c,2,'5 4',0.55,'t4c'));
+  s+=P.curve(S,'var(--sum)',4,'',1,'t4c');
+  $('t4-plot').innerHTML=s;
+  const ex={
+    '1false':'<p><strong>Neuron 1 alone</strong> is a ramp: flat until x = −1, then rising forever with slope +1. It can go up, but it can never come back down.</p>',
+    '2false':'<p><strong>Adding neuron 2</strong> (weight −2) at its hinge x = 0 changes the slope from +1 to +1 − 2 = <strong>−1</strong>. Now we have a peak at x = 0! But the line keeps falling forever.</p>',
+    '3false':'<p><strong>Adding neuron 3</strong> (weight +1) at x = 1 changes the slope from −1 to −1 + 1 = <strong>0</strong>. The fall stops and the line goes flat at 0. That\'s the triangle: up, down, flat. Slopes 0 → +1 → −1 → 0.</p>',
+    '1true':'<p><strong>With ReLU off</strong>, neuron 1 is just the straight line x + 1. No hinge, no flat part.</p>',
+    '2true':'<p><strong>With ReLU off</strong>, (x + 1) − 2x = 1 − x. Still a straight line, just tilted the other way. Adding lines can only give lines.</p>',
+    '3true':'<p><strong>With ReLU off</strong>, (x + 1) − 2x + (x − 1) = <strong>0</strong>. The whole network collapses to a flat line! The same weights that made a triangle now do nothing. This is why the ReLU bend (the nonlinearity) is essential.</p>'
+  };
+  $('t4-explain').innerHTML=ex[t4k+''+off];
+}
+$('t4-seg').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;t4k=+b.dataset.k;[...$('t4-seg').children].forEach(c=>c.classList.toggle('on',c===b));drawT4()});
+$('t4-off').addEventListener('change',drawT4);
+
+/* plant + gauges */
+function plantSVG(g){
+  g=Math.max(0,Math.min(1,g));
+  const stem=mix('#9c7a3c','#2f8f3a',g), leaf=mix('#b59a4a','#3faa4a',g);
+  const h=16+150*g, top=200-h;
+  let s=`<svg viewBox="0 0 200 250" width="190" height="236" role="img" aria-label="Plant illustration">`;
+  s+=`<ellipse cx="100" cy="240" rx="56" ry="6" fill="var(--line)"/>`;
+  const bend=g<0.35?(0.35-g)*70:0;
+  s+=`<path d="M100 200 Q ${100+bend*0.6} ${200-h/2} ${100+bend} ${top}" fill="none" stroke="${stem}" stroke-width="${4+2.5*g}" stroke-linecap="round"/>`;
+  const nl=Math.max(1,Math.round(g*5)), L=9+13*g, ang=g>=0.5?30:30-(0.5-g)*140;
+  for(let i=0;i<nl;i++){const t=(i+1)/(nl+1),yy=200-t*h,xx=100+bend*t*t;
+    s+=`<ellipse cx="${-L}" cy="0" rx="${L}" ry="${L*0.42}" fill="${leaf}" transform="translate(${xx} ${yy}) rotate(${ang})"/>`;
+    s+=`<ellipse cx="${L}" cy="0" rx="${L}" ry="${L*0.42}" fill="${leaf}" transform="translate(${xx} ${yy}) rotate(${-ang})"/>`;}
+  if(g>0.82){const fx=100,fy=top-4;for(let k=0;k<6;k++){const a=k*Math.PI/3;s+=`<circle cx="${fx+9*Math.cos(a)}" cy="${fy+9*Math.sin(a)}" r="7" fill="#f2b134"/>`}s+=`<circle cx="${fx}" cy="${fy}" r="6" fill="#c2410c"/>`}
+  else s+=`<circle cx="${100+bend}" cy="${top}" r="${3+3*g}" fill="${leaf}"/>`;
+  s+=`<polygon points="62,200 138,200 128,236 72,236" fill="#c46a3a"/><rect x="56" y="192" width="88" height="12" rx="3" fill="#a95a2f"/><ellipse cx="100" cy="194" rx="40" ry="4" fill="#5b3a24"/>`;
+  return s+'</svg>';
+}
+function gauge(frac,color,label,val){
+  frac=Math.max(0,Math.min(1,frac));const H=170,fh=H*frac;
+  return `<div style="text-align:center"><svg viewBox="0 0 46 220" width="40" height="200"><rect x="15" y="10" width="16" height="${H}" rx="8" fill="var(--card)" stroke="var(--line)"/><rect x="15" y="${10+H-fh}" width="16" height="${fh}" rx="8" fill="${color}"/><circle cx="23" cy="${H+22}" r="14" fill="${color}"/></svg><div style="font-size:12px;color:var(--sub);line-height:1.3">${label}<br><b style="color:var(--ink);font-weight:600">${val}</b></div></div>`;
+}
+function drawT5(){
+  const T=+$('t5-T').value;$('t5-Tv').textContent=T+' °C';
+  const x=(T-25)/10,y=tent(x),ok=y>=0.5;
+  $('t5-scene').innerHTML=gauge((T-5)/40,mix('#3987e5','#e34948',(T-5)/40),'Temp',T+' °C')+plantSVG(y);
+  const P=plot({xmin:5,xmax:45,ymin:-0.05,ymax:1.15,W:400,H:260,m:{l:44,r:12,t:22,b:34}});
+  const G=t=>tent((t-25)/10);
+  let s=P.frame([5,15,25,35,45],[0,0.5,1],'temperature (°C)','growth',v=>v,v=>Math.round(v*100)+'%');
+  s+=`<rect x="${P.sx(20)}" y="${P.m.t}" width="${P.sx(30)-P.sx(20)}" height="${260-P.m.t-P.m.b}" fill="var(--g)" opacity="0.1"/>`;
+  s+=`<line x1="${P.m.l}" x2="${400-P.m.r}" y1="${P.sy(0.5)}" y2="${P.sy(0.5)}" stroke="var(--warn)" stroke-dasharray="5 4"/><text x="${400-P.m.r}" y="${P.sy(0.5)-6}" text-anchor="end" font-size="11" fill="var(--warn)">threshold 0.5</text>`;
+  s+=P.curve(G,'var(--g)',3.5);
+  s+=`<line x1="${P.sx(T)}" x2="${P.sx(T)}" y1="${P.sy(0)}" y2="${P.sy(y)}" stroke="var(--ink)" stroke-dasharray="2 3"/>`+P.dot(T,y,ok?'var(--g)':'var(--c0)',7);
+  $('t5-plot').innerHTML=s;
+  $('t5-calc').innerHTML=`x = (${T} − 25) / 10 = ${f2(x)}<br>network output y = ${f2(y)}<br><span class="hl">Predicted growth: ${Math.round(y*100)}% of maximum</span><br><span class="verdict ${ok?'yes':'no'}" style="margin-top:6px">${ok?'Good conditions (y ≥ 0.5)':y>0?'Poor conditions (y < 0.5)':'No growth (y = 0)'}</span>`;
+}
+$('t5-T').addEventListener('input',drawT5);
+
+/* ---------- heatmap helper ---------- */
+function heat(cv,o){
+  const N=cv.width,ctx=cv.getContext('2d');
+  const [x0,x1]=o.xr||[-2,2],[y0,y1]=o.yr||[-2,2];
+  const toX=p=>x0+(x1-x0)*p/N,toY=q=>y1-(y1-y0)*q/N,toP=x=>(x-x0)/(x1-x0)*N,toQ=y=>(y1-y)/(y1-y0)*N;
+  const bg=hex(css('--card')),hu=hex(css(o.color));
+  const img=ctx.createImageData(N,N),cls=o.t!=null?new Uint8Array(N*N):null;
+  for(let q=0;q<N;q++){const yy=toY(q+0.5);for(let p=0;p<N;p++){const v=o.fn(toX(p+0.5),yy),a=Math.min(1,Math.max(0,v/o.vmax))*0.82,k=(q*N+p)*4;
+    img.data[k]=bg[0]+(hu[0]-bg[0])*a;img.data[k+1]=bg[1]+(hu[1]-bg[1])*a;img.data[k+2]=bg[2]+(hu[2]-bg[2])*a;img.data[k+3]=255;if(cls)cls[q*N+p]=v>=o.t?1:0}}
+  if(cls){const d=Math.max(1,Math.round(N/220)),bc=hex(css('--g'));
+    for(let q=d;q<N-d;q++)for(let p=d;p<N-d;p++){const c=cls[q*N+p];if(c!==cls[q*N+p+d]||c!==cls[q*N+p-d]||c!==cls[(q+d)*N+p]||c!==cls[(q-d)*N+p]){const k=(q*N+p)*4;img.data[k]=bc[0];img.data[k+1]=bc[1];img.data[k+2]=bc[2]}}}
+  ctx.putImageData(img,0,0);
+  const fs=Math.round(N/24);ctx.font=`${fs}px Inter, sans-serif`;ctx.fillStyle=css('--muted');
+  if(o.zero){ctx.strokeStyle=css('--axis');ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(toP(0),0);ctx.lineTo(toP(0),N);ctx.moveTo(0,toQ(0));ctx.lineTo(N,toQ(0));ctx.stroke()}
+  (o.tx||[]).forEach(t=>{ctx.textAlign='center';ctx.fillText(t.l,toP(t.v),N-fs*0.5)});
+  (o.ty||[]).forEach(t=>{ctx.textAlign='left';ctx.fillText(t.l,fs*0.35,toQ(t.v)+fs*0.35)});
+  ctx.fillStyle=css('--sub');
+  if(o.xl){ctx.textAlign='right';ctx.fillText(o.xl,N-fs*0.4,N-fs*1.6)}
+  if(o.yl){ctx.textAlign='left';ctx.fillText(o.yl,fs*0.35,fs*1.1)}
+  const ring=css('--card'),r=N/58;
+  (o.pts||[]).forEach(([a,b,l])=>{const X=toP(a),Y=toQ(b);ctx.fillStyle=l?css('--g'):css('--c0');ctx.strokeStyle=ring;ctx.lineWidth=2.5;
+    if(l){ctx.beginPath();ctx.arc(X,Y,r,0,7);ctx.fill();ctx.stroke()}else{ctx.fillRect(X-r*0.9,Y-r*0.9,r*1.8,r*1.8);ctx.strokeRect(X-r*0.9,Y-r*0.9,r*1.8,r*1.8)}
+    if(o.t!=null&&(o.fn(a,b)>=o.t?1:0)!==l){ctx.strokeStyle='#e24b4a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(X,Y,r*1.75,0,7);ctx.stroke()}});
+  if(o.test){const X=toP(o.test[0]),Y=toQ(o.test[1]),s=r*1.5;ctx.fillStyle=css('--ink');ctx.strokeStyle=ring;ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(X,Y-s);ctx.lineTo(X+s,Y);ctx.lineTo(X,Y+s);ctx.lineTo(X-s,Y);ctx.closePath();ctx.fill();ctx.stroke()}
+  return {toX,toY};
+}
+const mathT=[-1,1].map(v=>({v,l:v}));
+
+/* ---------- PART 2 ---------- */
+function drawD2(){
+  const a=+$('d2-a').value,b=+$('d2-b').value;$('d2-av').textContent=a.toFixed(1);$('d2-bv').textContent=b.toFixed(1);
+  $('arch2-live').innerHTML=arch(A2,{x:[a,b]});
+  const h=x=>[R(x+1),R(x),R(x-1)],A=h(a),B=h(b),T1=tent(a),T2=tent(b);
+  $('d2-calc').innerHTML=`<span style="color:var(--x1)">Tent(x₁)</span> = (+1)(${f2(A[0])}) + (−2)(${f2(A[1])}) + (+1)(${f2(A[2])}) = ${f2(T1)}<br>`+
+  `<span style="color:var(--x2)">Tent(x₂)</span> = (+1)(${f2(B[0])}) + (−2)(${f2(B[1])}) + (+1)(${f2(B[2])}) = ${f2(T2)}<br>`+
+  `<span class="hl">y = ${f2(T1)} + ${f2(T2)} = ${f2(T1+T2)}</span>`;
+}
+['d2-a','d2-b'].forEach(id=>$(id).addEventListener('input',drawD2));
+
+function drawD3(){
+  heat($('h-t1'),{fn:(a,b)=>tent(a),vmax:1,color:'--x1',zero:true,tx:mathT,ty:mathT,xl:'x₁',yl:'x₂'});
+  heat($('h-t2'),{fn:(a,b)=>tent(b),vmax:1,color:'--x2',zero:true,tx:mathT,ty:mathT,xl:'x₁',yl:'x₂'});
+  heat($('h-sum'),{fn:(a,b)=>tent(a)+tent(b),vmax:2,color:'--n3',zero:true,tx:mathT,ty:mathT,xl:'x₁',yl:'x₂'});
+}
+
+const PTS=[[0,0,1],[0.2,0.1,1],[-0.2,0.15,1],[0.1,-0.25,1],[-0.15,-0.2,1],[0.3,-0.05,1],[-0.05,0.35,1],[-0.3,-0.05,1],
+[1.2,0.2,0],[-1.3,-0.4,0],[0.3,1.4,0],[-0.2,-1.5,0],[1.5,1.5,0],[-1.6,1.2,0],[1.1,-1.3,0],[-1.4,-1.6,0],[0.7,0.5,0],[-0.6,0.6,0],[0.55,-0.6,0],[-0.7,-0.45,0],[0.9,0,0],[0,-0.9,0]];
+let d4test=[0.3,0.15];
+const F2=(a,b)=>tent(a)+tent(b);
+function drawD4(){
+  const t=+$('d4-t').value;$('d4-tv').textContent=t.toFixed(2);
+  heat($('d4-cv'),{fn:F2,vmax:2,color:'--n3',t,pts:PTS,test:d4test,zero:true,tx:[-2,-1,1,2].map(v=>({v,l:v})),ty:[-1,1].map(v=>({v,l:v})),xl:'x₁',yl:'x₂'});
+  const c=PTS.filter(([a,b,l])=>(F2(a,b)>=t?1:0)===l).length;
+  $('d4-acc').textContent=`${c}/${PTS.length} (${Math.round(c/PTS.length*100)}%)`;
+  $('d4-shape').textContent=t>1.001?'Diamond':t>0.999?'Plus sign':'Cross';
+  const [a,b]=d4test,T1=tent(a),T2=tent(b),y=T1+T2,k=y>=t;
+  $('d4-calc').innerHTML=`Test point (${f2(a)}, ${f2(b)})<br><span style="color:var(--x1)">Tent(x₁)</span> = ${f2(T1)}, <span style="color:var(--x2)">Tent(x₂)</span> = ${f2(T2)}<br><span class="hl">y = ${f2(y)}</span><br><span class="verdict ${k?'yes':'no'}" style="margin-top:6px">${f2(y)} ${k?'≥':'<'} ${t.toFixed(2)} → class ${k?1:0}</span>`;
+  $('d4-explain').innerHTML=t>1.001
+   ?`<p><strong>Why a diamond?</strong> Near the center each tent equals 1 minus the distance from 0, so y = 2 − |x₁| − |x₂|. The rule y ≥ ${t.toFixed(2)} becomes <strong>|x₁| + |x₂| ≤ ${f2(2-t)}</strong>, and that's exactly a diamond with corners at ±${f2(2-t)} on each axis. Raise the threshold to shrink it.</p>`
+   :`<p><strong>Why a cross now?</strong> With the threshold at ${t.toFixed(2)} (1 or below), a single tent is enough to pass it. So any point with x₁ near 0 <em>or</em> x₂ near 0 counts as class 1, even if the other input is far away. The orange squares on the axes get pulled in by mistake. Push the threshold above 1 to get the diamond back.</p>`;
+}
+$('d4-t').addEventListener('input',drawD4);
+$('d4-cv').addEventListener('click',e=>{const r=e.currentTarget.getBoundingClientRect(),N=480;
+  const x=-2+4*((e.clientX-r.left)/r.width),y=2-4*((e.clientY-r.top)/r.height);d4test=[Math.round(x*100)/100,Math.round(y*100)/100];drawD4()});
+
+const MR=50/30;
+function drawD5(){
+  const T=+$('d5-T').value,M=+$('d5-M').value;$('d5-Tv').textContent=T+' °C';$('d5-Mv').textContent=M+'%';
+  const a=(T-25)/10,b=(M-50)/30,T1=tent(a),T2=tent(b),y=T1+T2,ok=y>=1.5;
+  heat($('d5-cv'),{fn:F2,vmax:2,color:'--g',t:1.5,test:[a,b],xr:[-2,2],yr:[-MR,MR],
+    tx:[10,20,30,40].map(v=>({v:(v-25)/10,l:v+'°'})),ty:[25,50,75].map(v=>({v:(v-50)/30,l:v+'%'})),xl:'temperature',yl:'moisture'});
+  $('d5-scene').innerHTML=gauge((T-5)/40,mix('#3987e5','#e34948',(T-5)/40),'Temp',T+' °C')+plantSVG(y/2)+gauge(M/100,'#3b8bd4','Moisture',M+'%');
+  $('d5-calc').innerHTML=`x₁ = (${T} − 25) / 10 = ${f2(a)} → <span style="color:var(--x1)">Tent</span> = ${f2(T1)}<br>x₂ = (${M} − 50) / 30 = ${f2(b)} → <span style="color:var(--x2)">Tent</span> = ${f2(T2)}<br><span class="hl">y = ${f2(T1)} + ${f2(T2)} = ${f2(y)}</span> (max 2)<br><span class="verdict ${ok?'yes':'no'}" style="margin-top:6px">${ok?'Thrives: inside the safe zone':'Struggles: outside the safe zone'}</span>`;
+}
+['d5-T','d5-M'].forEach(id=>$(id).addEventListener('input',drawD5));
+$('d5-cv').addEventListener('click',e=>{const r=e.currentTarget.getBoundingClientRect();
+  const a=-2+4*((e.clientX-r.left)/r.width),b=MR-2*MR*((e.clientY-r.top)/r.height);
+  $('d5-T').value=Math.round(25+10*a);$('d5-M').value=Math.round(Math.max(0,Math.min(100,50+30*b)));drawD5()});
+
+/* ---------- boot ---------- */
+function drawAll(){
+  $('arch1-static').innerHTML=arch(A1,null);
+  $('arch2-static').innerHTML=arch(A2,null);
+  drawRelu();drawT2();drawT3();drawT4();drawT5();drawD2();drawD3();drawD4();drawD5();
+}
+drawAll();
+try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',drawAll)}catch(e){}
+if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{drawD3();drawD4();drawD5()});
+</script>
+</body>
+</html>
